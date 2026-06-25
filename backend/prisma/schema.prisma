@@ -1,0 +1,571 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Operator {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email         String   @unique
+  password_hash String
+  name          String
+  role          String   @default("operator")
+  created_at    DateTime @default(now()) @db.Timestamptz(6)
+  two_factor_secret String?
+
+  workspace_id  String?  @db.Uuid
+  workspace     Workspace? @relation(fields: [workspace_id], references: [id])
+  settings      OperatorSettings?
+
+  clients               Client[]
+  client_tool_accounts  ClientToolAccount[]
+  execution_contexts    ExecutionContext[]
+  executions            Execution[]
+  campaigns             Campaign[]
+  submitted_campaigns   Campaign[]           @relation("campaign_submitted_by")
+  approved_campaigns    Campaign[]           @relation("campaign_approved_by")
+  requested_approvals   CampaignApproval[]   @relation("approval_requested_by")
+  approved_approvals    CampaignApproval[]   @relation("approval_approved_by")
+  notifications         Notification[]
+  workflows             Workflow[]
+  campaign_workflows    CampaignWorkflow[]
+
+  @@map("operators")
+}
+
+model Workspace {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name       String
+  domain     String?
+  timezone   String?  @default("Eastern (EST)")
+  logo_url   String?
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  operators Operator[]
+
+  @@map("workspaces")
+}
+
+model OperatorSettings {
+  id                     String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  operator_id            String   @unique @db.Uuid
+  operator               Operator @relation(fields: [operator_id], references: [id], onDelete: Cascade)
+
+  ai_tone                String?  @default("Professional")
+  ai_personalization     String?  @default("Medium")
+  auto_reply             Boolean  @default(true)
+  auto_pause             Boolean  @default(true)
+  auto_optimize          Boolean  @default(false)
+  auto_score             Boolean  @default(true)
+
+  notifications          Json     @default("[]")
+
+  daily_send_limit       Int      @default(200)
+  inbox_rotation         String?  @default("Round Robin")
+  auto_pause_threshold   String?  @default("5% bounce rate")
+  safety_mode            Boolean  @default(true)
+  daily_connection_limit Int      @default(25)
+  daily_message_limit    Int      @default(50)
+  linkedin_account       String?  @default("sarah.linkedin")
+  default_crm            String?  @default("hubspot")
+  two_factor_enabled     Boolean  @default(false)
+
+  @@map("operator_settings")
+}
+
+model Client {
+  id                     String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                   String
+  description            String?
+  created_by_operator    Operator @relation(fields: [created_by_operator_id], references: [id])
+  created_by_operator_id String   @db.Uuid
+  created_at             DateTime @default(now()) @db.Timestamptz(6)
+  account_owner          String?
+  industry               String?
+  priority               String   @default("Medium")
+  region                 String?
+  status                 String   @default("Active")
+  website                String?
+  icp_summary            String?
+  strategy_notes         String?
+  channels               Json?    @default("[\"Email\"]")
+  connected_tools        Json?    @default("[]")
+  approval_mode          String?  @default("Approval required")
+  max_daily_sends        Int?     @default(150)
+  require_crm_approval   Boolean? @default(true)
+
+  tool_accounts      ClientToolAccount[]
+  execution_contexts ExecutionContext[]
+  executions         Execution[]
+  campaigns          Campaign[]
+  leads              Lead[]
+  credit             ClientCredit?
+  deals              Deal[]
+  inbox_messages     InboxMessage[]
+  inbox_conversations InboxConversation[]
+  workflows          Workflow[]
+
+  @@map("clients")
+}
+
+model ClientCredit {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  client_id  String   @unique @db.Uuid
+  client     Client   @relation(fields: [client_id], references: [id], onDelete: Cascade)
+  balance    Int      @default(2000)
+  total_used Int      @default(0)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+
+  transactions CreditTransaction[]
+
+  @@map("client_credits")
+}
+
+model CreditTransaction {
+  id                String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  credit_id         String   @db.Uuid
+  credit            ClientCredit @relation(fields: [credit_id], references: [id], onDelete: Cascade)
+  amount            Int
+  type              String   @default("debit") // "credit" | "debit"
+  description       String?
+  tool_name         String?
+  action            String?
+  campaign_id       String?  @db.Uuid
+  execution_id      String?  @db.Uuid
+  stripe_payment_id String?
+  created_at        DateTime @default(now()) @db.Timestamptz(6)
+
+  @@map("credit_transactions")
+}
+
+model ClientToolAccount {
+  id                     String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  client                 Client   @relation(fields: [client_id], references: [id], onDelete: Cascade)
+  client_id              String   @db.Uuid
+  tool_name              String
+  account_label          String
+  api_key_encrypted      String
+  created_by_operator    Operator @relation(fields: [created_by_operator_id], references: [id])
+  created_by_operator_id String   @db.Uuid
+  created_at             DateTime @default(now()) @db.Timestamptz(6)
+
+  executions Execution[]
+
+  @@map("client_tool_accounts")
+}
+
+model Tool {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tool_id     String   @unique
+  name        String
+  category    String
+  description String?
+  status      String   @default("active")
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  @@map("tools")
+}
+
+model ExecutionContext {
+  id                     String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  client                 Client   @relation(fields: [client_id], references: [id], onDelete: Cascade)
+  client_id              String   @db.Uuid
+  name                   String
+  description            String?
+  context_data           Json?
+  created_by_operator    Operator @relation(fields: [created_by_operator_id], references: [id])
+  created_by_operator_id String   @db.Uuid
+  created_at             DateTime @default(now()) @db.Timestamptz(6)
+
+  executions Execution[]
+
+  @@map("execution_contexts")
+}
+
+model Execution {
+  id                       String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  client                   Client            @relation(fields: [client_id], references: [id], onDelete: Cascade)
+  client_id                String            @db.Uuid
+  tool_name                String
+  tool_account             ClientToolAccount @relation(fields: [tool_account_id], references: [id])
+  tool_account_id          String            @db.Uuid
+  context                  ExecutionContext? @relation(fields: [context_id], references: [id], onDelete: SetNull)
+  context_id               String?           @db.Uuid
+  action                   String
+  status                   String            @default("pending")
+  request_payload          Json?
+  response_payload         Json?
+  error_message            String?
+  triggered_by_operator    Operator          @relation(fields: [triggered_by_operator_id], references: [id])
+  triggered_by_operator_id String            @db.Uuid
+  created_at               DateTime          @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime          @default(now()) @updatedAt @db.Timestamptz(6)
+
+  @@map("executions")
+}
+
+model Plan {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name        String
+  tagline     String?
+  price       String
+  credits     String?
+  features    Json     @default("[]")
+  is_custom   Boolean  @default(false)
+  button_text String
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  @@map("plans")
+}
+
+model Campaign {
+  id                     String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  client                 Client            @relation(fields: [client_id], references: [id], onDelete: Cascade)
+  client_id              String            @db.Uuid
+  name                   String
+  description            String?
+  status                 String            @default("draft")
+  approval_status        String            @default("draft")
+  manifest               Json?
+  estimated_cost         Float?
+  estimated_duration     Int?
+  priority               Int               @default(5)
+  submitted_by_operator   Operator?         @relation("campaign_submitted_by", fields: [submitted_by_operator_id], references: [id])
+  submitted_by_operator_id String?           @db.Uuid
+  submitted_at           DateTime?         @db.Timestamptz(6)
+  approved_by_operator    Operator?         @relation("campaign_approved_by", fields: [approved_by_operator_id], references: [id])
+  approved_by_operator_id String?           @db.Uuid
+  approved_at            DateTime?         @db.Timestamptz(6)
+  rejection_reason        String?
+  created_by_operator    Operator          @relation(fields: [created_by_operator_id], references: [id])
+  created_by_operator_id String            @db.Uuid
+  created_at             DateTime          @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime          @default(now()) @updatedAt @db.Timestamptz(6)
+
+  steps     CampaignStep[]
+  approvals CampaignApproval[]
+  queue     ExecutionQueue?
+  leads     Lead[]
+  workflows CampaignWorkflow[]
+
+  @@map("campaigns")
+}
+
+model CampaignStep {
+  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  campaign    Campaign  @relation(fields: [campaign_id], references: [id], onDelete: Cascade)
+  campaign_id String    @db.Uuid
+  step_order  Int
+  tool_name   String
+  action      String
+  params      Json?
+  status      String    @default("pending")
+  dependencies Json?
+  created_at  DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at  DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+
+  @@map("campaign_steps")
+}
+
+model CampaignApproval {
+  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  campaign               Campaign  @relation(fields: [campaign_id], references: [id], onDelete: Cascade)
+  campaign_id            String    @db.Uuid
+  requested_by_operator  Operator  @relation("approval_requested_by", fields: [requested_by_operator_id], references: [id])
+  requested_by_operator_id String  @db.Uuid
+  approved_by_operator   Operator? @relation("approval_approved_by", fields: [approved_by_operator_id], references: [id])
+  approved_by_operator_id String?  @db.Uuid
+  status                 String    @default("pending")
+  comments               String?
+  created_at             DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+
+  @@map("campaign_approvals")
+}
+
+model ExecutionQueue {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  campaign      Campaign  @relation(fields: [campaign_id], references: [id], onDelete: Cascade)
+  campaign_id   String    @unique @db.Uuid
+  status        String    @default("pending")
+  priority      Int       @default(5)
+  scheduled_at  DateTime  @default(now()) @db.Timestamptz(6)
+  started_at    DateTime? @db.Timestamptz(6)
+  completed_at  DateTime? @db.Timestamptz(6)
+  error_message String?
+  retry_count   Int       @default(0)
+  max_retries   Int       @default(3)
+  created_at    DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at    DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+
+  @@map("execution_queue")
+}
+
+model Lead {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  client_id     String   @db.Uuid
+  campaign_id   String?  @db.Uuid
+  email         String
+  first_name    String?
+  last_name     String?
+  title         String?
+  company_name  String?
+  domain        String?
+  linkedin_url  String?
+  industry      String?
+  source        String   @default("hunter")
+  status        String   @default("new")
+  enriched      Boolean  @default(false)
+  enrichment_data Json?
+  created_at    DateTime @default(now()) @db.Timestamptz(6)
+
+  client    Client   @relation(fields: [client_id], references: [id], onDelete: Cascade)
+  campaign  Campaign? @relation(fields: [campaign_id], references: [id], onDelete: SetNull)
+  workflow_runs CampaignWorkflowRun[]
+
+  @@map("leads")
+}
+
+model Notification {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  operator    Operator @relation(fields: [operator_id], references: [id])
+  operator_id String   @db.Uuid
+  type        String
+  title       String
+  message     String
+  entity_id   String?
+  entity_type String?
+  is_read     Boolean  @default(false)
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  @@map("notifications")
+}
+
+model Playbook {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name         String
+  difficulty   String
+  description  String
+  creator      String   @default("Control Tower Team")
+  rating       Float    @default(4.5)
+  imports      String   @default("0")
+  confidence   Int      @default(80)
+  deploy_time  String   @default("15 minutes")
+  credits      Int      @default(20)
+  category     String
+  reply_rate   String   @default("8-12%")
+  created_at   DateTime @default(now()) @db.Timestamptz(6)
+
+  @@map("playbooks")
+}
+
+model Deal {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  client_id  String   @db.Uuid
+  client     Client   @relation(fields: [client_id], references: [id], onDelete: Cascade)
+  name       String
+  contact    String
+  amount     String
+  health     Int      @default(80)
+  stage      String   // "New Lead", "Engaged", "Meeting", "Proposal", "Closed"
+  auto       Boolean  @default(true)
+  avatar     String   @default("D")
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  @@map("deals")
+}
+
+model InboxMessage {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  client_id   String   @db.Uuid
+  client      Client   @relation(fields: [client_id], references: [id], onDelete: Cascade)
+  sender      String
+  company     String
+  campaign    String
+  subject     String
+  body        String
+  tags        Json     @default("[]")
+  tool        String
+  unread      Boolean  @default(true)
+  sentiment   String   @default("Standard")
+  avatar      String   @default("U")
+  created_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  @@map("inbox_messages")
+}
+
+// --- Unified Inbox (multi-tool conversations + sending) ---
+model InboxConversation {
+  id                       String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  client_id                String   @db.Uuid
+  client                   Client   @relation(fields: [client_id], references: [id], onDelete: Cascade)
+  tool_id                  String // provider id e.g. "smartlead" | "instantly" | "heyreach" | "hubspot"
+  source_platform          String // human label of the source platform
+  external_conversation_id String
+  contact_name             String?
+  contact_email            String?
+  company_name             String?
+  campaign_name            String?
+  status                   String   @default("New Reply") // New Reply | Needs Response | Replied | AI Draft Ready | Closed | Failed
+  last_message             String?
+  last_message_at          DateTime?
+  unread_count             Int      @default(0)
+  created_at               DateTime @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+
+  messages InboxConversationMessage[]
+
+  @@unique([client_id, tool_id, external_conversation_id])
+  @@index([client_id])
+  @@map("inbox_conversations")
+}
+
+model InboxConversationMessage {
+  id                  String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversation_id     String   @db.Uuid
+  conversation        InboxConversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
+  client_id           String   @db.Uuid
+  tool_id             String
+  external_message_id String?
+  direction           String // "incoming" | "outgoing"
+  sender              String?
+  recipient           String?
+  body                String
+  status              String   @default("sent") // Draft | Sending | Sent | Delivered | Read | Failed
+  sent_at             DateTime @default(now()) @db.Timestamptz(6)
+  created_at          DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([conversation_id])
+  @@map("inbox_conversation_messages")
+}
+
+model Workflow {
+  id                     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                   String
+  mode                   String    @default("standard") // standard / advanced
+  execution_mode         String    @default("auto_with_guardrails") // auto_with_guardrails / manual / approval_required
+  trigger_type           String
+  target_type            String    @default("people") // people / companies / deals
+  account_scope          String?
+  campaign_scope         String?
+  enrollment_filters     Json      @default("[]")
+  guardrails             Json      @default("[]")
+  path_actions           Json      @default("[]")
+  tool_configuration     Json      @default("{}")
+  status                 String    @default("draft") // draft / active / paused / completed
+  created_by_operator_id String    @db.Uuid
+  workspace_id           String?   @db.Uuid
+  client_id              String    @db.Uuid
+  created_at             DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at             DateTime  @default(now()) @updatedAt @db.Timestamptz(6)
+
+  created_by             Operator  @relation(fields: [created_by_operator_id], references: [id], onDelete: Cascade)
+  client                 Client    @relation(fields: [client_id], references: [id], onDelete: Cascade)
+  runs                   WorkflowRun[]
+
+  @@map("workflows")
+}
+
+model WorkflowRun {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workflow_id     String   @db.Uuid
+  workflow        Workflow @relation(fields: [workflow_id], references: [id], onDelete: Cascade)
+  trigger_event   String
+  record_id       String?
+  target_type     String
+  filter_result   Json?    // stores details of filter evaluation
+  guardrail_result Json?   // stores details of guardrail evaluation
+  action_executed String?  // step/action executed
+  tool_used       String?  // tool used
+  status          String   @default("pending") // pending / running / completed / failed / held
+  error_message   String?
+  timestamp       DateTime @default(now()) @db.Timestamptz(6)
+
+  @@map("workflow_runs")
+}
+
+model CampaignWorkflow {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  campaign_id     String   @db.Uuid
+  workflow_name   String
+  status          String   @default("draft") // draft, active, paused, completed
+  execution_mode  String   @default("auto_with_guardrails")
+  created_by      String   @db.Uuid
+  created_at      DateTime @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+
+  campaign        Campaign @relation(fields: [campaign_id], references: [id], onDelete: Cascade)
+  operator        Operator @relation(fields: [created_by], references: [id], onDelete: Cascade)
+  nodes           WorkflowNode[]
+  edges           WorkflowEdge[]
+  runs            CampaignWorkflowRun[]
+
+  @@map("campaign_workflows")
+}
+
+model WorkflowNode {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workflow_id        String   @db.Uuid
+  node_type          String   // source, enrichment, ai, action, condition, delay, event
+  tool               String   // apollo, clay, smartlead, instantly, bettercontact, heyreach, calendly
+  configuration_json Json     @default("{}")
+  position           Json?    // e.g. { "x": 0, "y": 0 }
+
+  workflow           CampaignWorkflow @relation(fields: [workflow_id], references: [id], onDelete: Cascade)
+  source_edges       WorkflowEdge[]   @relation("source_node")
+  target_edges       WorkflowEdge[]   @relation("target_node")
+  run_steps          WorkflowRunStep[]
+
+  @@map("workflow_nodes")
+}
+
+model WorkflowEdge {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  workflow_id    String   @db.Uuid
+  source_node_id String   @db.Uuid
+  target_node_id String   @db.Uuid
+  condition_type String?  // e.g. "yes", "no", "default"
+
+  workflow       CampaignWorkflow @relation(fields: [workflow_id], references: [id], onDelete: Cascade)
+  source_node    WorkflowNode     @relation("source_node", fields: [source_node_id], references: [id], onDelete: Cascade)
+  target_node    WorkflowNode     @relation("target_node", fields: [target_node_id], references: [id], onDelete: Cascade)
+
+  @@map("workflow_edges")
+}
+
+model CampaignWorkflowRun {
+  id                   String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  campaign_workflow_id String   @db.Uuid
+  status               String   @default("pending") // pending, running, completed, failed, held
+  error_message        String?
+  lead_id              String?  @db.Uuid
+  created_at           DateTime @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime @default(now()) @updatedAt @db.Timestamptz(6)
+
+  workflow             CampaignWorkflow @relation(fields: [campaign_workflow_id], references: [id], onDelete: Cascade)
+  lead                 Lead?            @relation(fields: [lead_id], references: [id], onDelete: SetNull)
+  steps                WorkflowRunStep[]
+
+  @@map("campaign_workflow_runs")
+}
+
+model WorkflowRunStep {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  run_id         String   @db.Uuid
+  node_id        String   @db.Uuid
+  status         String   @default("pending") // pending, running, completed, failed, waiting_event
+  output_json    Json?
+  error_message  String?
+  started_at     DateTime? @db.Timestamptz(6)
+  completed_at   DateTime? @db.Timestamptz(6)
+
+  run            CampaignWorkflowRun @relation(fields: [run_id], references: [id], onDelete: Cascade)
+  node           WorkflowNode        @relation(fields: [node_id], references: [id], onDelete: Cascade)
+
+  @@map("workflow_run_steps")
+}
+
